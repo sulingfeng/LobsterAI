@@ -260,7 +260,19 @@ function showOverlaysOnAllDisplays(
       fs.writeFileSync(tmpHtmlPath, html, 'utf-8');
       tmpHtmlPaths.push(tmpHtmlPath);
       console.log(`[Screenshot] overlay[${i}] loading from temp file: ${tmpHtmlPath} (${html.length} bytes)`);
-      win.loadFile(tmpHtmlPath);
+
+      // Capture console output from overlay for debugging
+      win.webContents.on('console-message', (_event, level, message) => {
+        console.log(`[Screenshot] overlay[${displayIndex}] console[${level}]: ${message}`);
+      });
+
+      win.loadFile(tmpHtmlPath).catch((err) => {
+        console.error(`[Screenshot] overlay[${displayIndex}] loadFile failed:`, err);
+      });
+
+      win.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+        console.error(`[Screenshot] overlay[${displayIndex}] did-fail-load: code=${errorCode}, desc=${errorDescription}`);
+      });
 
       win.webContents.on('did-finish-load', () => {
         if (!settled && !win.isDestroyed()) {
@@ -322,7 +334,14 @@ export async function captureScreenshot(
       const img = images[i];
       if (img && !img.isEmpty()) {
         const sz = img.getSize();
-        console.log(`[Screenshot] display[${i}] image: ${sz.width}x${sz.height}`);
+        // Save a small debug JPEG to verify the capture is not all-black
+        const debugJpeg = img.resize({ width: Math.round(sz.width / 4), height: Math.round(sz.height / 4) }).toJPEG(50);
+        console.log(`[Screenshot] display[${i}] image: ${sz.width}x${sz.height}, debugJpeg=${debugJpeg.length} bytes`);
+        try {
+          const debugPath = path.join(app.getPath('temp'), `lobsterai-debug-${i}.jpg`);
+          fs.writeFileSync(debugPath, debugJpeg);
+          console.log(`[Screenshot] debug image saved: ${debugPath}`);
+        } catch { /* ignore */ }
       } else {
         console.warn(`[Screenshot] display[${i}] image: null or empty`);
       }
@@ -359,7 +378,9 @@ export async function captureScreenshot(
           width: ob.width,
           height: ob.height,
         });
-        return `data:image/jpeg;base64,${waCropped.toJPEG(OVERLAY_JPEG_QUALITY).toString('base64')}`;
+        const jpegBuf = waCropped.toJPEG(OVERLAY_JPEG_QUALITY);
+        console.log(`[Screenshot] bgUrl[${i}] JPEG bytes: ${jpegBuf.length}, cropped to ${ob.width}x${ob.height}`);
+        return `data:image/jpeg;base64,${jpegBuf.toString('base64')}`;
       }
 
       const jpegUrl = `data:image/jpeg;base64,${resized.toJPEG(OVERLAY_JPEG_QUALITY).toString('base64')}`;
@@ -620,7 +641,12 @@ function doOK(){
 }
 
 ic();
-bg=new Image();bg.onload=function(){draw()};bg.src=${bg};
+console.log('[overlay] init D='+D+' W='+W+' HH='+HH+' canvas='+C.width+'x'+C.height);
+bg=new Image();
+bg.onload=function(){console.log('[overlay] bg loaded: '+bg.naturalWidth+'x'+bg.naturalHeight);draw()};
+bg.onerror=function(e){console.error('[overlay] bg load FAILED',e)};
+bg.src=${bg};
+console.log('[overlay] bg.src set, length='+(bg.src?bg.src.length:0));
 window.addEventListener('resize',function(){W=window.innerWidth;HH=window.innerHeight;ic();draw()});
 })();
 </script></body></html>`;
