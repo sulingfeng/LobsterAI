@@ -2066,6 +2066,22 @@ if (!gotTheLock) {
     return { success: true, path: result.filePaths[0] };
   });
 
+  ipcMain.handle('dialog:selectFiles', async (event, options?: { title?: string; filters?: { name: string; extensions: string[] }[] }) => {
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    const dialogOptions = {
+      properties: ['openFile', 'multiSelections'] as ('openFile' | 'multiSelections')[],
+      title: options?.title,
+      filters: options?.filters,
+    };
+    const result = ownerWindow
+      ? await dialog.showOpenDialog(ownerWindow, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: true, paths: [] };
+    }
+    return { success: true, paths: result.filePaths };
+  });
+
   ipcMain.handle(
     'dialog:saveInlineFile',
     async (

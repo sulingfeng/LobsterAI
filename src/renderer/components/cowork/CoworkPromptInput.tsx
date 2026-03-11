@@ -29,7 +29,9 @@ const INPUT_FILE_LABEL = '输入文件';
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg']);
 
 const isImagePath = (filePath: string): boolean => {
-  const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase();
+  const dotIndex = filePath.lastIndexOf('.');
+  if (dotIndex === -1) return false;
+  const ext = filePath.slice(dotIndex).toLowerCase();
   return IMAGE_EXTENSIONS.has(ext);
 };
 
@@ -113,6 +115,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     const [showFolderMenu, setShowFolderMenu] = useState(false);
     const [showFolderRequiredWarning, setShowFolderRequiredWarning] = useState(false);
     const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+    const [isAddingFile, setIsAddingFile] = useState(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const folderButtonRef = useRef<HTMLButtonElement>(null);
     const dragDepthRef = useRef(0);
@@ -456,29 +459,33 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
   }, [addAttachment, addImageAttachmentFromDataUrl, disabled, fileToDataUrl, getNativeFilePath, isStreaming, modelSupportsImage, saveInlineFile]);
 
   const handleAddFile = useCallback(async () => {
+    if (isAddingFile || disabled || isStreaming) return;
+    setIsAddingFile(true);
     try {
-      const result = await window.electron.dialog.selectFile({
+      const result = await window.electron.dialog.selectFiles({
         title: i18nService.t('coworkAddFile'),
       });
-      if (result.success && result.path) {
-        // Check if it's an image and model supports images
-        if (isImagePath(result.path) && modelSupportsImage) {
+      if (!result.success || result.paths.length === 0) return;
+      for (const filePath of result.paths) {
+        if (isImagePath(filePath) && modelSupportsImage) {
           try {
-            const readResult = await window.electron.dialog.readFileAsDataUrl(result.path);
+            const readResult = await window.electron.dialog.readFileAsDataUrl(filePath);
             if (readResult.success && readResult.dataUrl) {
-              addAttachment(result.path, { isImage: true, dataUrl: readResult.dataUrl });
-              return;
+              addAttachment(filePath, { isImage: true, dataUrl: readResult.dataUrl });
+              continue;
             }
           } catch (error) {
             console.error('Failed to read image as data URL:', error);
           }
         }
-        addAttachment(result.path);
+        addAttachment(filePath);
       }
     } catch (error) {
       console.error('Failed to select file:', error);
+    } finally {
+      setIsAddingFile(false);
     }
-  }, [addAttachment, modelSupportsImage]);
+  }, [addAttachment, isAddingFile, disabled, isStreaming, modelSupportsImage]);
 
   const handleRemoveAttachment = useCallback((path: string) => {
     setAttachments((prev) => prev.filter((attachment) => attachment.path !== path));
@@ -633,7 +640,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
                   className="flex items-center justify-center p-1.5 rounded-lg text-sm dark:text-claude-darkTextSecondary text-claude-textSecondary dark:hover:bg-claude-darkSurfaceHover hover:bg-claude-surfaceHover dark:hover:text-claude-darkText hover:text-claude-text transition-colors"
                   title={i18nService.t('coworkAddFile')}
                   aria-label={i18nService.t('coworkAddFile')}
-                  disabled={disabled || isStreaming}
+                  disabled={disabled || isStreaming || isAddingFile}
                 >
                   <PaperClipIcon className="h-4 w-4" />
                 </button>
@@ -689,7 +696,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
                 className="flex-shrink-0 p-1.5 rounded-lg dark:text-claude-darkTextSecondary text-claude-textSecondary dark:hover:bg-claude-darkSurfaceHover hover:bg-claude-surfaceHover dark:hover:text-claude-darkText hover:text-claude-text transition-colors"
                 title={i18nService.t('coworkAddFile')}
                 aria-label={i18nService.t('coworkAddFile')}
-                disabled={disabled || isStreaming}
+                disabled={disabled || isStreaming || isAddingFile}
               >
                 <PaperClipIcon className="h-4 w-4" />
               </button>
