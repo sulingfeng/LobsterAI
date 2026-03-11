@@ -353,9 +353,11 @@ export class OpenClawEngineManager extends EventEmitter {
       OPENCLAW_NO_RESPAWN: '1',
       OPENCLAW_ENGINE_VERSION: runtime.version || DEFAULT_OPENCLAW_VERSION,
       OPENCLAW_BUNDLED_PLUGINS_DIR: path.join(runtime.root, 'extensions'),
+      // Enable debug-level logging so gateway emits phase-level detail during startup.
+      OPENCLAW_LOG_LEVEL: 'debug',
     };
 
-    const forkArgs = ['gateway', '--bind', 'loopback', '--port', String(port), '--token', token];
+    const forkArgs = ['gateway', '--bind', 'loopback', '--port', String(port), '--token', token, '--verbose'];
     console.log(`[OpenClaw] forking gateway: entry=${openclawEntry}, cwd=${runtime.root}, port=${port}, args=${JSON.stringify(forkArgs)}`);
     const child = utilityProcess.fork(
       openclawEntry,
@@ -575,35 +577,54 @@ export class OpenClawEngineManager extends EventEmitter {
       `// Electron's utilityProcess exits before the async work completes.\n` +
       `const _keepAlive = setInterval(() => {}, 30000);\n` +
       `const t0 = Date.now();\n` +
-      `// Strategy: Use synchronous require(esm) (Node.js 22.12+) for much faster loading.\n` +
-      `// Dynamic import() in Electron's utilityProcess is extremely slow (~78s for 855 files).\n` +
-      `// Synchronous require() avoids the async ESM resolver overhead.\n` +
-      `let loaded = false;\n` +
-      `try {\n` +
-      `  try {\n` +
-      `    const wf = require('./dist/warning-filter.js');\n` +
-      `    if (typeof wf.installProcessWarningFilter === 'function') {\n` +
-      `      wf.installProcessWarningFilter();\n` +
-      `    }\n` +
-      `  } catch (_) {}\n` +
-      `  require('./dist/entry.js');\n` +
-      `  loaded = true;\n` +
-      `  process.stderr.write('[openclaw-launcher] require(entry.js) ok (' + (Date.now() - t0) + 'ms)\\n');\n` +
-      `} catch (err) {\n` +
-      `  process.stderr.write('[openclaw-launcher] require(entry.js) failed (' + (Date.now() - t0) + 'ms): ' + err.message + '\\n');\n` +
+      `// Strategy 1: Try the esbuild single-file bundle via dynamic import().\n` +
+      `// The bundle collapses ~1100 ESM modules into one file, eliminating the\n` +
+      `// expensive ESM module resolution overhead in Electron's utilityProcess.\n` +
+      `// We use import() (not require()) to avoid the ESM loader re-entrancy lock\n` +
+      `// that causes microtask deadlocks when require(esm) is used.\n` +
+      `const bundlePath = path.join(__dirname, 'gateway-bundle.mjs');\n` +
+      `if (fs.existsSync(bundlePath)) {\n` +
+      `  // Patch argv[1] to the bundle path so openclaw's isMainModule() matches.\n` +
+      `  // isMainModule compares basename(import.meta.url) with basename(argv[1]);\n` +
+      `  // both will be "gateway-bundle.mjs", satisfying the basename equality check.\n` +
+      `  // argv[1] was already patched to esmEntry above; just overwrite it.\n` +
+      `  process.argv[1] = bundlePath;\n` +
+      `  process.stderr.write('[openclaw-launcher] argv(patched for bundle)=' + JSON.stringify(process.argv) + '\\n');\n` +
+      `  const bundleUrl = pathToFileURL(bundlePath).href;\n` +
+      `  process.stderr.write('[openclaw-launcher] loading bundle via import(): ' + bundleUrl + '\\n');\n` +
+      `  import(bundleUrl).then(() => {\n` +
+      `    process.stderr.write('[openclaw-launcher] import(gateway-bundle.mjs) ok (' + (Date.now() - t0) + 'ms)\\n');\n` +
+      `  }).catch((err) => {\n` +
+      `    process.stderr.write('[openclaw-launcher] import(gateway-bundle.mjs) failed (' + (Date.now() - t0) + 'ms): ' + (err.stack || err) + '\\n');\n` +
+      `    process.stderr.write('[openclaw-launcher] Falling back to multi-file dist...\\n');\n` +
+      `    return _loadFallback();\n` +
+      `  });\n` +
+      `} else {\n` +
+      `  _loadFallback();\n` +
       `}\n` +
-      `if (!loaded) {\n` +
-      `  (async () => {\n` +
+      `// Fallback: load the original multi-file dist.\n` +
+      `function _loadFallback() {\n` +
+      `  try {\n` +
       `    try {\n` +
-      `      const importUrl = pathToFileURL(esmEntry).href;\n` +
-      `      process.stderr.write('[openclaw-launcher] falling back to import(): ' + importUrl + '\\n');\n` +
-      `      await import(importUrl);\n` +
+      `      const wf = require('./dist/warning-filter.js');\n` +
+      `      if (typeof wf.installProcessWarningFilter === 'function') {\n` +
+      `        wf.installProcessWarningFilter();\n` +
+      `      }\n` +
+      `    } catch (_) {}\n` +
+      `    require('./dist/entry.js');\n` +
+      `    process.stderr.write('[openclaw-launcher] require(entry.js) ok (' + (Date.now() - t0) + 'ms)\\n');\n` +
+      `  } catch (err) {\n` +
+      `    process.stderr.write('[openclaw-launcher] require(entry.js) failed (' + (Date.now() - t0) + 'ms): ' + err.message + '\\n');\n` +
+      `    const entryPath = path.join(__dirname, 'dist', 'entry.js');\n` +
+      `    const importUrl = pathToFileURL(entryPath).href;\n` +
+      `    process.stderr.write('[openclaw-launcher] falling back to import(): ' + importUrl + '\\n');\n` +
+      `    import(importUrl).then(() => {\n` +
       `      process.stderr.write('[openclaw-launcher] import() ok (' + (Date.now() - t0) + 'ms)\\n');\n` +
-      `    } catch (err) {\n` +
-      `      process.stderr.write('[openclaw-launcher] ERROR (' + (Date.now() - t0) + 'ms): ' + (err.stack || err) + '\\n');\n` +
+      `    }).catch((err2) => {\n` +
+      `      process.stderr.write('[openclaw-launcher] ERROR (' + (Date.now() - t0) + 'ms): ' + (err2.stack || err2) + '\\n');\n` +
       `      process.exit(1);\n` +
-      `    }\n` +
-      `  })();\n` +
+      `    });\n` +
+      `  }\n` +
       `}\n`;
 
     try {
@@ -748,7 +769,7 @@ export class OpenClawEngineManager extends EventEmitter {
     throw new Error('No available loopback port for OpenClaw gateway.');
   }
 
-  private async isGatewayHealthy(port: number): Promise<boolean> {
+  private async isGatewayHealthy(port: number, verbose = false): Promise<boolean> {
     const probeUrls = [
       `http://127.0.0.1:${port}/health`,
       `http://127.0.0.1:${port}/healthz`,
@@ -758,12 +779,14 @@ export class OpenClawEngineManager extends EventEmitter {
 
     // Run all HTTP probes in parallel and resolve as soon as any succeeds.
     // Previously these ran sequentially, costing up to 4*1200ms per tick.
-    const httpProbes = probeUrls.map(async (url) => {
+    const httpResults: string[] = [];
+    const httpProbes = probeUrls.map(async (url, i) => {
       try {
         const response = await fetchWithTimeout(url, 1500);
+        if (verbose) httpResults[i] = `${url} → ${response.status}`;
         if (response.status < 500) return true;
-      } catch {
-        // probe failed
+      } catch (err) {
+        if (verbose) httpResults[i] = `${url} → ${(err as Error).message || err}`;
       }
       return false;
     });
@@ -772,7 +795,12 @@ export class OpenClawEngineManager extends EventEmitter {
     const tcpProbe = isPortReachable('127.0.0.1', port, 1500);
 
     const results = await Promise.all([...httpProbes, tcpProbe]);
-    return results.some(Boolean);
+    const healthy = results.some(Boolean);
+    if (verbose && !healthy) {
+      const tcpResult = results[results.length - 1] ? 'reachable' : 'unreachable';
+      console.log(`[OpenClaw] health probe details: tcp=${tcpResult}, ${httpResults.join(', ')}`);
+    }
+    return healthy;
   }
 
   private waitForGatewayReady(port: number, timeoutMs: number): Promise<boolean> {
@@ -795,7 +823,9 @@ export class OpenClawEngineManager extends EventEmitter {
         pollCount += 1;
         const elapsedMs = Date.now() - startedAt;
 
-        const healthy = await this.isGatewayHealthy(port);
+        // Log verbose probe details every 10 polls (~6s) to diagnose health check failures.
+        const verboseProbe = pollCount % 10 === 0;
+        const healthy = await this.isGatewayHealthy(port, verboseProbe);
         if (healthy) {
           console.log(`[OpenClaw] waitForGatewayReady: gateway healthy after ${elapsedMs}ms (${pollCount} polls)`);
           resolve(true);
