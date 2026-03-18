@@ -6,6 +6,7 @@ const { spawnSync } = require('child_process');
 const asar = require('@electron/asar');
 const { ensurePortablePythonRuntime, checkRuntimeHealth } = require('./setup-python-runtime.js');
 const { syncLocalOpenClawExtensions } = require('./sync-local-openclaw-extensions.cjs');
+const { packDirectory: packOpenClawTar } = require('./pack-openclaw-tar.cjs');
 
 function isWindowsTarget(context) {
   return context?.electronPlatformName === 'win32';
@@ -464,6 +465,25 @@ async function beforePack(context) {
   ensureBundledOpenClawRuntime(context);
   // Install skill dependencies first (for all platforms)
   installSkillDependencies();
+
+  if (isWindowsTarget(context)) {
+    // Pack OpenClaw runtime into a single .tar for faster NSIS installation.
+    // NSIS extracts thousands of small files very slowly on NTFS; a single tar
+    // archive is extracted by the 7z solid extractor almost instantly, and we
+    // unpack it in the NSIS customInstall macro using Electron's Node runtime.
+    const runtimeSource = path.join(__dirname, '..', 'vendor', 'openclaw-runtime', 'current');
+    const tarOutput = path.join(__dirname, '..', 'vendor', 'openclaw-runtime', 'cfmind.tar');
+
+    console.log('[electron-builder-hooks] Packing OpenClaw runtime into tar for Windows...');
+    const t0 = Date.now();
+    const { totalFiles, totalDirs } = packOpenClawTar(runtimeSource, tarOutput);
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+    const sizeMB = (statSync(tarOutput).size / (1024 * 1024)).toFixed(1);
+    console.log(
+      `[electron-builder-hooks] OpenClaw tar packed in ${elapsed}s: `
+      + `${totalFiles} files, ${totalDirs} dirs, ${sizeMB} MB`
+    );
+  }
 
   if (!isWindowsTarget(context)) {
     return;

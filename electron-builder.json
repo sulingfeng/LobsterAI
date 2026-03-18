@@ -131,34 +131,12 @@
         ]
       },
       {
-        "from": "vendor/openclaw-runtime/current",
-        "to": "cfmind",
-        "filter": [
-          "**/*",
-          "!**/*.map",
-          "!**/*.d.ts",
-          "!**/*.d.cts",
-          "!**/*.d.mts",
-          "!**/README.md",
-          "!**/README",
-          "!**/readme.md",
-          "!**/CHANGELOG.md",
-          "!**/CHANGELOG",
-          "!**/HISTORY.md",
-          "!**/LICENSE",
-          "!**/LICENSE.md",
-          "!**/LICENSE.txt",
-          "!**/.eslintrc*",
-          "!**/.prettierrc*",
-          "!**/tsconfig.json",
-          "!**/tsconfig.*.json",
-          "!**/*.test.*",
-          "!**/*.spec.*",
-          "!**/docs/**",
-          "!**/tests/**",
-          "!**/test/**",
-          "!**/__tests__/**"
-        ]
+        "from": "vendor/openclaw-runtime/cfmind.tar",
+        "to": "cfmind.tar"
+      },
+      {
+        "from": "scripts/unpack-cfmind.cjs",
+        "to": "unpack-cfmind.cjs"
       }
     ]
   },
