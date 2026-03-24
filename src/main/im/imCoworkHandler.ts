@@ -322,11 +322,17 @@ export class IMCoworkHandler extends EventEmitter {
       throw new Error(`IM 工作目录不存在或无效: ${resolvedWorkspaceRoot}`);
     }
 
+    // Resolve the agent bound to this platform
+    const imSettings = this.imStore.getIMSettings();
+    const agentId = imSettings.platformAgentBindings?.[platform] || 'main';
+
     const session = this.coworkStore.createSession(
       title,
       resolvedWorkspaceRoot,
       systemPrompt,
-      config.executionMode || 'auto'
+      config.executionMode || 'auto',
+      [],
+      agentId
     );
 
     // Save mapping

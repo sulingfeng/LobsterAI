@@ -9,7 +9,7 @@ import { SignalIcon, XMarkIcon, CheckCircleIcon, XCircleIcon, ExclamationTriangl
 import { EyeIcon, EyeSlashIcon, XCircleIcon as XCircleIconSolid } from '@heroicons/react/20/solid';
 import { RootState } from '../../store';
 import { imService } from '../../services/im';
-import { setDingTalkConfig, setFeishuConfig, setTelegramOpenClawConfig, setQQConfig, setDiscordConfig, setNimConfig, setXiaomifengConfig, setWecomConfig, setWeixinConfig, setPopoConfig, clearError } from '../../store/slices/imSlice';
+import { setDingTalkConfig, setFeishuConfig, setTelegramOpenClawConfig, setQQConfig, setDiscordConfig, setNimConfig, setXiaomifengConfig, setWecomConfig, setWeixinConfig, setPopoConfig, setIMSettings, clearError } from '../../store/slices/imSlice';
 import { i18nService } from '../../services/i18n';
 import type { IMPlatform, IMConnectivityCheck, IMConnectivityTestResult, IMGatewayConfig, TelegramOpenClawConfig, DiscordOpenClawConfig, FeishuOpenClawConfig, DingTalkOpenClawConfig, QQOpenClawConfig, WecomOpenClawConfig, PopoOpenClawConfig } from '../../types/im';
 import { getVisibleIMPlatforms } from '../../utils/regionFilter';
@@ -121,6 +121,7 @@ function deepSet(obj: Record<string, unknown>, path: string, value: unknown): Re
 const IMSettings: React.FC = () => {
   const dispatch = useDispatch();
   const { config, status, isLoading } = useSelector((state: RootState) => state.im);
+  const agents = useSelector((state: RootState) => state.agent.agents);
   const [activePlatform, setActivePlatform] = useState<IMPlatform>('dingtalk');
   const [testingPlatform, setTestingPlatform] = useState<IMPlatform | null>(null);
   const [connectivityResults, setConnectivityResults] = useState<Partial<Record<IMPlatform, IMConnectivityTestResult>>>({});
@@ -151,6 +152,13 @@ const IMSettings: React.FC = () => {
       setLanguage(i18nService.getLanguage());
     });
     return unsubscribe;
+  }, []);
+
+  // Load agents for the binding dropdown
+  useEffect(() => {
+    import('../../services/agent').then(({ agentService }) => {
+      agentService.loadAgents();
+    });
   }, []);
 
   // Track component mounted state for async operations
@@ -1069,6 +1077,39 @@ const IMSettings: React.FC = () => {
     </div>
   );
 
+  const renderAgentBindingDropdown = (platform: IMPlatform) => (
+    <div className="space-y-1.5">
+      <label className="block text-xs font-medium dark:text-claude-darkTextSecondary text-claude-textSecondary">
+        {i18nService.t('imAgentBinding')}
+      </label>
+      <select
+        value={config.settings?.platformAgentBindings?.[platform] || 'main'}
+        onChange={async (e) => {
+          const agentId = e.target.value;
+          const current = config.settings?.platformAgentBindings || {};
+          const next = { ...current, [platform]: agentId };
+          // Remove entries that are 'main' to keep config clean
+          if (agentId === 'main') delete next[platform];
+          dispatch(setIMSettings({ platformAgentBindings: next }));
+          await imService.persistConfig({ settings: { ...config.settings, platformAgentBindings: next } });
+        }}
+        className="w-full px-3 py-1.5 text-sm rounded-md border dark:border-claude-darkBorder border-claude-border dark:bg-claude-darkBg bg-white dark:text-claude-darkText text-claude-text focus:outline-none focus:ring-1 focus:ring-claude-accent"
+      >
+        <option value="main">{i18nService.t('imAgentBindingDefault')}</option>
+        {agents
+          .filter((a) => a.id !== 'main' && a.enabled)
+          .map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.icon ? `${a.icon} ${a.name}` : a.name}
+            </option>
+          ))}
+      </select>
+      <p className="text-xs dark:text-claude-darkTextSecondary/60 text-claude-textSecondary/60">
+        {i18nService.t('imAgentBindingHint')}
+      </p>
+    </div>
+  );
+
   return (
     <div className="flex h-full gap-4">
       {/* Platform List - Left Side */}
@@ -1157,9 +1198,11 @@ const IMSettings: React.FC = () => {
           </div>
         </div>
 
+
         {/* DingTalk Settings */}
         {activePlatform === 'dingtalk' && (
           <div className="space-y-3">
+            {renderAgentBindingDropdown('dingtalk')}
             <PlatformGuide
               steps={[
                 i18nService.t('imDingtalkGuideStep1'),
@@ -1477,6 +1520,7 @@ const IMSettings: React.FC = () => {
         {/* Feishu Settings */}
         {activePlatform === 'feishu' && (
           <div className="space-y-3">
+            {renderAgentBindingDropdown('feishu')}
             {/* Scan QR code section */}
             <div className="rounded-lg border border-dashed dark:border-claude-darkBorder/60 border-claude-border/60 p-4 text-center space-y-3">
               {(feishuQrStatus === 'idle' || feishuQrStatus === 'error') && (
@@ -1881,6 +1925,7 @@ const IMSettings: React.FC = () => {
         {/* QQ Settings */}
         {activePlatform === 'qq' && (
           <div className="space-y-3">
+            {renderAgentBindingDropdown('qq')}
             <PlatformGuide
               steps={[
                 i18nService.t('imQQGuideStep1'),
@@ -2148,6 +2193,7 @@ const IMSettings: React.FC = () => {
         {/* Telegram Settings */}
         {activePlatform === 'telegram' && (
           <div className="space-y-3">
+            {renderAgentBindingDropdown('telegram')}
             <PlatformGuide
               steps={[
                 i18nService.t('imTelegramGuideStep1'),
@@ -2466,6 +2512,7 @@ const IMSettings: React.FC = () => {
         {/* Discord Settings */}
         {activePlatform === 'discord' && (
           <div className="space-y-3">
+            {renderAgentBindingDropdown('discord')}
             <PlatformGuide
               steps={[
                 i18nService.t('imDiscordGuideStep1'),
@@ -2798,6 +2845,7 @@ const IMSettings: React.FC = () => {
         {/* NIM (NetEase IM) Settings */}
         {activePlatform === 'nim' && (
           <div className="space-y-3">
+            {renderAgentBindingDropdown('nim')}
             <PlatformGuide
               title={i18nService.t('nimCredentialsGuide')}
               steps={[
@@ -2881,6 +2929,7 @@ const IMSettings: React.FC = () => {
         {/* 小蜜蜂设置*/}
         {activePlatform === 'xiaomifeng' && (
           <div className="space-y-3">
+            {renderAgentBindingDropdown('xiaomifeng')}
             {/* Client ID */}
             <div className="space-y-1.5">
               <label className="block text-xs font-medium dark:text-claude-darkTextSecondary text-claude-textSecondary">
@@ -2970,6 +3019,7 @@ const IMSettings: React.FC = () => {
         {/* Weixin (微信) Settings */}
         {activePlatform === 'weixin' && (
           <div className="space-y-3">
+            {renderAgentBindingDropdown('weixin')}
             {/* Scan QR code section */}
             <div className="rounded-lg border border-dashed dark:border-claude-darkBorder/60 border-claude-border/60 p-4 text-center space-y-3">
               {(weixinQrStatus === 'idle' || weixinQrStatus === 'error') && (
@@ -3054,6 +3104,7 @@ const IMSettings: React.FC = () => {
         {/* WeCom (企业微信) Settings */}
         {activePlatform === 'wecom' && (
           <div className="space-y-3">
+            {renderAgentBindingDropdown('wecom')}
             {/* Scan QR code section */}
             <div className="rounded-lg border border-dashed dark:border-claude-darkBorder/60 border-claude-border/60 p-4 text-center space-y-2">
               <button
@@ -3333,6 +3384,7 @@ const IMSettings: React.FC = () => {
 
         {activePlatform === 'popo' && (
           <div className="space-y-3">
+            {renderAgentBindingDropdown('popo')}
             {/* Platform Guide */}
             <PlatformGuide
               steps={[

@@ -268,9 +268,12 @@ export class OpenClawChannelSessionSync {
       : displayId;
     const title = `${titlePrefix} ${shortId}`;
     const cwd = this.getDefaultCwd();
-    console.log('[ChannelSessionSync] creating new cowork session: title=', title, 'cwd=', cwd);
+    // Look up the per-platform agent binding so the session is filed under the correct agent.
+    const imSettings = this.imStore.getIMSettings();
+    const agentId = imSettings.platformAgentBindings?.[parsed.platform] || 'main';
+    console.log('[ChannelSessionSync] creating new cowork session: title=', title, 'cwd=', cwd, 'agentId=', agentId);
 
-    const session = this.coworkStore.createSession(title, cwd, '', 'local');
+    const session = this.coworkStore.createSession(title, cwd, '', 'local', [], agentId);
     console.log(
       `[ChannelSessionSync] Created session for ${parsed.platform} conversation ${parsed.conversationId}: ${session.id}`,
     );

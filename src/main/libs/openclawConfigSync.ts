@@ -2,7 +2,7 @@ import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import type { CoworkConfig, CoworkExecutionMode, Agent } from '../coworkStore';
-import type { TelegramOpenClawConfig, DiscordOpenClawConfig } from '../im/types';
+import type { TelegramOpenClawConfig, DiscordOpenClawConfig, IMSettings } from '../im/types';
 import type { DingTalkOpenClawConfig, FeishuOpenClawConfig, QQOpenClawConfig, WecomOpenClawConfig, PopoOpenClawConfig, NimConfig, WeixinOpenClawConfig } from '../im/types';
 import { resolveRawApiConfig } from './claudeSettings';
 import type { OpenClawEngineManager } from './openclawEngineManager';
@@ -432,6 +432,7 @@ type OpenClawConfigSyncDeps = {
   getPopoConfig: () => PopoOpenClawConfig | null;
   getNimConfig: () => NimConfig | null;
   getWeixinConfig: () => WeixinOpenClawConfig | null;
+  getIMSettings?: () => IMSettings | null;
   getMcpBridgeConfig?: () => McpBridgeConfig | null;
   getSkillsList?: () => Array<{ id: string; enabled: boolean }>;
   getAgents?: () => Agent[];
@@ -449,6 +450,7 @@ export class OpenClawConfigSync {
   private readonly getPopoConfig: () => PopoOpenClawConfig | null;
   private readonly getNimConfig: () => NimConfig | null;
   private readonly getWeixinConfig: () => WeixinOpenClawConfig | null;
+  private readonly getIMSettings?: () => IMSettings | null;
   private readonly getMcpBridgeConfig?: () => McpBridgeConfig | null;
   private readonly getSkillsList?: () => Array<{ id: string; enabled: boolean }>;
   private readonly getAgents?: () => Agent[];
@@ -465,6 +467,7 @@ export class OpenClawConfigSync {
     this.getPopoConfig = deps.getPopoConfig;
     this.getNimConfig = deps.getNimConfig;
     this.getWeixinConfig = deps.getWeixinConfig;
+    this.getIMSettings = deps.getIMSettings;
     this.getMcpBridgeConfig = deps.getMcpBridgeConfig;
     this.getSkillsList = deps.getSkillsList;
     this.getAgents = deps.getAgents;
@@ -570,6 +573,7 @@ export class OpenClawConfigSync {
         },
         ...this.buildAgentsList(),
       },
+      ...this.buildBindings(),
       session: {
         dmScope: 'per-channel-peer',
       },
@@ -916,6 +920,37 @@ export class OpenClawConfigSync {
       ...(weixinConfig?.accountId ? { accountId: weixinConfig.accountId } : {}),
     };
     managedConfig.channels = { ...(managedConfig.channels as Record<string, unknown> || {}), 'openclaw-weixin': weixinChannel };
+
+    // Inject _agentBinding into channel configs that have a non-main binding,
+    // forcing those channels to restart when the binding changes.  OpenClaw
+    // channel plugins capture their config at startup and never refresh it,
+    // so bindings-only config changes (kind: "none" in the reload plan) are
+    // invisible to running plugins.  By touching the channel config we trigger
+    // a "channels.*" diff path which forces the plugin to restart.
+    const platformBindingsForSentinel = this.getIMSettings?.()?.platformAgentBindings;
+    if (platformBindingsForSentinel) {
+      // Map openclaw channel key → platform key
+      const channelToPlatform: Record<string, string> = {
+        'dingtalk-connector': 'dingtalk',
+        feishu: 'feishu',
+        telegram: 'telegram',
+        discord: 'discord',
+        qqbot: 'qq',
+        wecom: 'wecom',
+        'moltbot-popo': 'popo',
+        nim: 'nim',
+        'openclaw-weixin': 'weixin',
+      };
+      const channels = (managedConfig.channels ?? {}) as Record<string, Record<string, unknown>>;
+      for (const channelKey of Object.keys(channels)) {
+        if (!channels[channelKey] || typeof channels[channelKey] !== 'object') continue;
+        const platformKey = channelToPlatform[channelKey];
+        const boundAgentId = platformKey ? platformBindingsForSentinel[platformKey] : undefined;
+        if (boundAgentId && boundAgentId !== 'main') {
+          channels[channelKey]._agentBinding = boundAgentId;
+        }
+      }
+    }
 
     const nextContent = `${JSON.stringify(managedConfig, null, 2)}\n`;
     let currentContent = '';
@@ -1292,6 +1327,55 @@ export class OpenClawConfigSync {
     }
 
     return list.length > 0 ? { list } : {};
+  }
+
+  /**
+   * Build the `bindings` config array for openclaw.json.
+   *
+   * Each IM platform can be independently bound to a different agent via
+   * `IMSettings.platformAgentBindings`.  Only channels with an explicit
+   * non-main binding produce an entry.
+   */
+  private buildBindings(): { bindings?: Array<Record<string, unknown>> } {
+    const imSettings = this.getIMSettings?.();
+    const platformBindings = imSettings?.platformAgentBindings;
+    if (!platformBindings || Object.keys(platformBindings).length === 0) return {};
+
+    const agents = this.getAgents?.() ?? [];
+
+    // Map openclaw channel name → platform key used in platformAgentBindings
+    const channelMap: Array<{ getter: () => { enabled: boolean } | null; channel: string; platform: string }> = [
+      { getter: () => this.getDingTalkConfig(), channel: 'dingtalk-connector', platform: 'dingtalk' },
+      { getter: () => this.getFeishuConfig(), channel: 'feishu', platform: 'feishu' },
+      { getter: () => this.getTelegramOpenClawConfig?.() ?? null, channel: 'telegram', platform: 'telegram' },
+      { getter: () => this.getDiscordOpenClawConfig?.() ?? null, channel: 'discord', platform: 'discord' },
+      { getter: () => this.getQQConfig(), channel: 'qqbot', platform: 'qq' },
+      { getter: () => this.getWecomConfig(), channel: 'wecom', platform: 'wecom' },
+      { getter: () => this.getPopoConfig(), channel: 'moltbot-popo', platform: 'popo' },
+      { getter: () => this.getNimConfig(), channel: 'nim', platform: 'nim' },
+      { getter: () => this.getWeixinConfig(), channel: 'openclaw-weixin', platform: 'weixin' },
+    ];
+
+    const bindings: Array<Record<string, unknown>> = [];
+    for (const { getter, channel, platform } of channelMap) {
+      const agentId = platformBindings[platform];
+      if (!agentId || agentId === 'main') continue;
+
+      // Verify the target agent actually exists and is enabled
+      const targetAgent = agents.find((a) => a.id === agentId && a.enabled);
+      if (!targetAgent) continue;
+
+      try {
+        const cfg = getter();
+        if (cfg?.enabled) {
+          bindings.push({ agentId, match: { channel } });
+        }
+      } catch {
+        // Skip channels that fail to load config
+      }
+    }
+
+    return bindings.length > 0 ? { bindings } : {};
   }
 
   /**
