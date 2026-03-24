@@ -5,6 +5,8 @@ export interface AppConfig {
     key: string;
     baseUrl: string;
   };
+  // 自定义模型提供商递增 ID 计数器（单调递增，删除后不复用）
+  customProviderNextId?: number;
   // 模型配置
   model: {
     availableModels: Array<{
@@ -186,17 +188,6 @@ export interface AppConfig {
         supportsImage?: boolean;
       }>;
     };
-    custom: {
-      enabled: boolean;
-      apiKey: string;
-      baseUrl: string;
-      apiFormat?: 'anthropic' | 'openai';
-      models?: Array<{
-        id: string;
-        name: string;
-        supportsImage?: boolean;
-      }>;
-    };
     [key: string]: {
       enabled: boolean;
       apiKey: string;
@@ -206,6 +197,7 @@ export interface AppConfig {
       authType?: 'apikey' | 'oauth';
       oauthRefreshToken?: string;
       oauthTokenExpiresAt?: number;
+      displayName?: string;
       models?: Array<{
         id: string;
         name: string;
@@ -398,14 +390,8 @@ export const defaultConfig: AppConfig = {
         { id: 'glm-4.7-flash', name: 'GLM 4.7 Flash', supportsImage: false }
       ]
     },
-    custom: {
-      enabled: false,
-      apiKey: '',
-      baseUrl: '',
-      apiFormat: 'openai',
-      models: []
-    }
   },
+  customProviderNextId: 0,
   theme: 'system',
   language: 'zh',
   useSystemProxy: false,
@@ -431,7 +417,7 @@ export const CONFIG_KEYS = {
 };
 
 // 模型提供商分类
-export const CHINA_PROVIDERS = ['deepseek', 'moonshot', 'qwen', 'zhipu', 'minimax', 'volcengine', 'youdaozhiyun', 'stepfun', 'xiaomi', 'ollama', 'custom'] as const;
+export const CHINA_PROVIDERS = ['deepseek', 'moonshot', 'qwen', 'zhipu', 'minimax', 'volcengine', 'youdaozhiyun', 'stepfun', 'xiaomi', 'ollama'] as const;
 export const GLOBAL_PROVIDERS = ['openai', 'gemini', 'anthropic', 'openrouter'] as const;
 export const EN_PRIORITY_PROVIDERS = ['openai', 'anthropic', 'gemini'] as const;
 
@@ -446,7 +432,7 @@ export const getVisibleProviders = (language: 'zh' | 'en'): readonly string[] =>
 
   // 中文 → 中国版，英文 → 国际版
   if (language === 'zh') {
-    return CHINA_PROVIDERS;
+    return [...CHINA_PROVIDERS];
   }
 
   const orderedProviders = [
@@ -455,13 +441,24 @@ export const getVisibleProviders = (language: 'zh' | 'en'): readonly string[] =>
     ...GLOBAL_PROVIDERS,
   ];
   const uniqueProviders = [...new Set(orderedProviders)];
-  // Move ollama and custom to the end, with custom last
-  for (const key of ['ollama', 'custom'] as const) {
-    const idx = uniqueProviders.indexOf(key);
-    if (idx !== -1) {
-      uniqueProviders.splice(idx, 1);
-      uniqueProviders.push(key);
-    }
+  // Move ollama to the end (custom providers are appended dynamically)
+  const ollamaIdx = uniqueProviders.indexOf('ollama');
+  if (ollamaIdx !== -1) {
+    uniqueProviders.splice(ollamaIdx, 1);
+    uniqueProviders.push('ollama');
   }
   return uniqueProviders;
+};
+
+/**
+ * 判断 provider key 是否为自定义提供商（custom_0, custom_1, ...）
+ */
+export const isCustomProvider = (key: string): boolean => key.startsWith('custom_');
+
+/**
+ * 从 custom_N key 中提取默认显示名称（如 custom_0 → "Custom0"）
+ */
+export const getCustomProviderDefaultName = (key: string): string => {
+  const suffix = key.replace('custom_', '');
+  return `Custom${suffix}`;
 };
