@@ -10,18 +10,15 @@ import { SkillsButton, ActiveSkillBadge } from '../skills';
 import { i18nService } from '../../services/i18n';
 import { skillService } from '../../services/skill';
 import { RootState } from '../../store';
-import { setDraftPrompt } from '../../store/slices/coworkSlice';
+import { setDraftPrompt, setDraftAttachments, clearDraftAttachments, type DraftAttachment } from '../../store/slices/coworkSlice';
 import { setSkills, toggleActiveSkill } from '../../store/slices/skillSlice';
 import { Skill } from '../../types/skill';
 import { CoworkImageAttachment } from '../../types/cowork';
 import { getCompactFolderName } from '../../utils/path';
 
-type CoworkAttachment = {
-  path: string;
-  name: string;
-  isImage?: boolean;
-  dataUrl?: string;
-};
+// CoworkAttachment is aliased from the Redux-persisted DraftAttachment type
+// so that attachment state survives view switches (cowork ↔ skills, etc.)
+type CoworkAttachment = DraftAttachment;
 
 const INPUT_FILE_LABEL = '输入文件';
 
@@ -115,8 +112,8 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     const dispatch = useDispatch();
     const draftKey = sessionId || '__home__';
     const draftPrompt = useSelector((state: RootState) => state.cowork.draftPrompts[draftKey] || '');
+    const attachments = useSelector((state: RootState) => state.cowork.draftAttachments[draftKey] || []) as CoworkAttachment[];
     const [value, setValue] = useState(draftPrompt);
-    const [attachments, setAttachments] = useState<CoworkAttachment[]>([]);
     const [showFolderMenu, setShowFolderMenu] = useState(false);
     const [showFolderRequiredWarning, setShowFolderRequiredWarning] = useState(false);
     const [isDraggingFiles, setIsDraggingFiles] = useState(false);
@@ -186,7 +183,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
       const shouldClear = detail?.clear ?? true;
       if (shouldClear) {
         setValue('');
-        setAttachments([]);
+        dispatch(clearDraftAttachments(draftKey));
       }
       requestAnimationFrame(() => {
         textareaRef.current?.focus();
@@ -274,7 +271,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     if (result === false) return;
     setValue('');
     dispatch(setDraftPrompt({ sessionId: draftKey, draft: '' }));
-    setAttachments([]);
+    dispatch(clearDraftAttachments(draftKey));
     setImageVisionHint(false);
   }, [value, isStreaming, disabled, onSubmit, activeSkillIds, skills, attachments, showFolderSelector, workingDirectory, dispatch]);
 
@@ -334,31 +331,32 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
 
   const addAttachment = useCallback((filePath: string, imageInfo?: { isImage: boolean; dataUrl?: string }) => {
     if (!filePath) return;
-    setAttachments((prev) => {
-      if (prev.some((attachment) => attachment.path === filePath)) {
-        return prev;
-      }
-      return [...prev, {
+    const current = attachments;
+    if (current.some((attachment) => attachment.path === filePath)) return;
+    dispatch(setDraftAttachments({
+      draftKey,
+      attachments: [...current, {
         path: filePath,
         name: getFileNameFromPath(filePath),
         isImage: imageInfo?.isImage,
         dataUrl: imageInfo?.dataUrl,
-      }];
-    });
-  }, []);
+      }],
+    }));
+  }, [attachments, dispatch, draftKey]);
 
   const addImageAttachmentFromDataUrl = useCallback((name: string, dataUrl: string) => {
     // Use the dataUrl as the unique key (no file path for inline images)
     const pseudoPath = `inline:${name}:${Date.now()}`;
-    setAttachments((prev) => {
-      return [...prev, {
+    dispatch(setDraftAttachments({
+      draftKey,
+      attachments: [...attachments, {
         path: pseudoPath,
         name,
         isImage: true,
         dataUrl,
-      }];
-    });
-  }, []);
+      }],
+    }));
+  }, [attachments, dispatch, draftKey]);
 
   const fileToDataUrl = useCallback((file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -527,8 +525,11 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
   }, [addAttachment, isAddingFile, disabled, isStreaming, modelSupportsImage]);
 
   const handleRemoveAttachment = useCallback((path: string) => {
-    setAttachments((prev) => prev.filter((attachment) => attachment.path !== path));
-  }, []);
+    dispatch(setDraftAttachments({
+      draftKey,
+      attachments: attachments.filter((attachment) => attachment.path !== path),
+    }));
+  }, [attachments, dispatch, draftKey]);
 
   const hasFileTransfer = (dataTransfer: DataTransfer | null): boolean => {
     if (!dataTransfer) return false;
