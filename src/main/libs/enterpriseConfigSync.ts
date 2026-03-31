@@ -237,7 +237,7 @@ function syncIMChannels(configPath: string, imStore: IMStore): void {
       'moltbot-popo': (cfg) => imStore.setPopoConfig(cfg),
       'nim': (cfg) => imStore.setNimConfig(cfg),
       'openclaw-weixin': (cfg) => imStore.setWeixinConfig(cfg),
-      'xiaomifeng': (cfg) => imStore.setXiaomifengConfig(cfg),
+      'netease-bee': (cfg) => imStore.setNeteaseBeeChanConfig(cfg),
     };
 
     let syncedCount = 0;
