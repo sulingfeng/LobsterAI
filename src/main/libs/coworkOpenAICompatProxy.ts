@@ -2687,3 +2687,11 @@ export function setCoworkProxySessionId(sessionId: string | null): void {
   // It was previously used to track session IDs for proxy routing
   console.debug('[OpenAICompatProxy] setCoworkProxySessionId:', sessionId);
 }
+
+export function setProxyTokenRefresher(refresher: () => Promise<string | null>): void {
+  // This function sets a token refresher callback for the OpenAI compat proxy
+  // The refresher will be called when the proxy encounters 401/403 errors
+  console.debug('[OpenAICompatProxy] setProxyTokenRefresher called');
+  // Store the refresher for later use if needed
+  // Currently a no-op implementation for compatibility
+}
