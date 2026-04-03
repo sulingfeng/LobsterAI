@@ -530,6 +530,10 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
   const [testModeUnlocked, setTestModeUnlocked] = useState(false);
   const [updateCheckStatus, setUpdateCheckStatus] = useState<'idle' | 'checking' | 'upToDate' | 'error'>('idle');
 
+  // Port modal state
+  const [showPortModal, setShowPortModal] = useState(false);
+  const [proxyPort, setProxyPort] = useState<number | null>(null);
+
   useEffect(() => {
     window.electron.appInfo.getVersion().then(setAppVersion);
   }, []);
@@ -537,6 +541,24 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
   useEffect(() => {
     setShowApiKey(false);
   }, [activeProvider]);
+
+  // 获取代理端口号
+  useEffect(() => {
+    const fetchProxyPort = async () => {
+      try {
+        const port = await window.electron.appInfo.getProxyPort();
+        setProxyPort(port);
+      } catch (error) {
+        console.error('Failed to get proxy port:', error);
+        setProxyPort(null);
+      }
+    };
+
+    fetchProxyPort();
+    // 每5秒刷新一次端口状态
+    const interval = setInterval(fetchProxyPort, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleCopyContactEmail = useCallback(async () => {
     const copied = await copyTextToClipboard(ABOUT_CONTACT_EMAIL);
@@ -3429,7 +3451,13 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
         return (
           <div className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-foreground mb-3">
+              <label 
+                className="block text-sm font-medium text-foreground mb-3 cursor-pointer hover:text-accent select-none"
+                onClick={() => {
+                  setShowPortModal(true);
+                }}
+                title="点击查看当前端口"
+              >
                 {i18nService.t('keyboardShortcuts')}
               </label>
               <div className="space-y-3">
@@ -3998,6 +4026,60 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
                   >
                     {coworkMemoryEditingId ? i18nService.t('save') : i18nService.t('coworkMemoryCrudCreate')}
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Port Modal */}
+          {showPortModal && (
+            <div
+              className="absolute inset-0 z-20 flex items-center justify-center bg-black/35 px-4 rounded-2xl"
+              onClick={() => setShowPortModal(false)}
+            >
+              <div
+                className="relative w-80 rounded-xl shadow-2xl bg-surface border border-border p-5"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex flex-col items-center text-center">
+                  <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center mb-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-blue-500">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+                    </svg>
+                  </div>
+                  <h3 className="text-sm font-semibold text-foreground mb-2">
+                    当前使用端口
+                  </h3>
+                  {proxyPort !== null ? (
+                    <>
+                      <p className="text-sm text-secondary mb-3">
+                        HTTP API 端口: <span className="font-mono font-semibold text-foreground">{proxyPort}</span>
+                      </p>
+                      <p className="text-xs text-secondary mb-5 break-all">
+                        访问地址: http://0.0.0.0:{proxyPort}/get/task/status
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowPortModal(false)}
+                        className="w-full px-4 py-2 text-sm rounded-lg bg-primary text-white hover:bg-primary-hover transition-colors"
+                      >
+                        确定
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm text-secondary mb-5">
+                        HTTP API 服务未启动
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowPortModal(false)}
+                        className="w-full px-4 py-2 text-sm rounded-lg bg-primary text-white hover:bg-primary-hover transition-colors"
+                      >
+                        确定
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

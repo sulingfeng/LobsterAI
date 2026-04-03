@@ -412,6 +412,7 @@ interface IElectronAPI {
   appInfo: {
     getVersion: () => Promise<string>;
     getSystemLocale: () => Promise<string>;
+    getProxyPort: () => Promise<number | null>;
   };
   appUpdate: {
     download: (url: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;

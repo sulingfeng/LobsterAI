@@ -1879,6 +1879,7 @@ if (!gotTheLock) {
 
   ipcMain.handle('app:getVersion', () => app.getVersion());
   ipcMain.handle('app:getSystemLocale', () => app.getLocale());
+  ipcMain.handle('app:getProxyPort', () => getCoworkOpenAICompatProxyPort());
 
   // ── Auth IPC handlers ──
 
