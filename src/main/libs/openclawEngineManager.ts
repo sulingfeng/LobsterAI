@@ -770,7 +770,7 @@ export class OpenClawEngineManager extends EventEmitter {
       const bundlePath = path.join(runtimeRoot, 'gateway-bundle.mjs');
       if (fs.existsSync(bundlePath)) {
         console.log('[OpenClaw] resolveOpenClawEntry: using bundle fast path');
-        return this.ensureGatewayLauncherCjsForBundle(runtimeRoot);
+        return this.ensureGatewayLauncherCjsForBundle();
       }
     }
 
@@ -786,13 +786,16 @@ export class OpenClawEngineManager extends EventEmitter {
     // the ESM loader misinterprets the drive letter (e.g. "D:") as a URL scheme.
     // Work around this by generating a CJS wrapper that imports the ESM entry via file:// URL.
     if (process.platform === 'win32') {
-      return this.ensureGatewayLauncherCjs(runtimeRoot, esmEntry);
+      return this.ensureGatewayLauncherCjs(esmEntry);
     }
     return esmEntry;
   }
 
-  private ensureGatewayLauncherCjs(runtimeRoot: string, esmEntry: string): string {
-    const launcherPath = path.join(runtimeRoot, 'gateway-launcher.cjs');
+  private ensureGatewayLauncherCjs(esmEntry: string): string {
+    // The bundled runtime lives under process.resourcesPath/cfmind in packaged builds,
+    // which is typically inside Program Files on Windows and not writable for standard users.
+    // Write the launcher into the per-user state dir instead.
+    const launcherPath = path.join(this.stateDir, 'gateway-launcher.cjs');
     const esmBasename = path.basename(esmEntry);
     const expectedContent =
       `// Auto-generated CJS wrapper for Windows ESM compatibility.\n` +
@@ -801,6 +804,9 @@ export class OpenClawEngineManager extends EventEmitter {
       `const { pathToFileURL } = require('node:url');\n` +
       `const path = require('node:path');\n` +
       `const fs = require('node:fs');\n` +
+      `// Runtime root is provided by the parent process (OPENCLAW_HOME).\n` +
+      `// Fall back to the launcher directory only for development.\n` +
+      `const runtimeRoot = process.env.OPENCLAW_HOME || __dirname;\n` +
       `// Enable V8 compile cache to speed up subsequent startups.\n` +
       `// Cache is stored per-user so it survives app restarts and reboots.\n` +
       `try {\n` +
@@ -809,7 +815,7 @@ export class OpenClawEngineManager extends EventEmitter {
       `  enableCompileCache(ccDir);\n` +
       `  process.stderr.write('[openclaw-launcher] compile-cache dir=' + require('node:module').getCompileCacheDir() + '\\n');\n` +
       `} catch (_) {}\n` +
-      `const esmEntry = path.join(__dirname, '${esmBasename}');\n` +
+      `const esmEntry = path.join(runtimeRoot, '${esmBasename}');\n` +
       `// Patch argv so openclaw's isMainModule() recognizes this as the main entry.\n` +
       `// In standard Node.js: process.argv = [execPath, scriptPath, ...args]\n` +
       `// In Electron utilityProcess: process.argv = [execPath, ...args] (no scriptPath)\n` +
@@ -836,7 +842,7 @@ export class OpenClawEngineManager extends EventEmitter {
       `// expensive ESM module resolution overhead in Electron's utilityProcess.\n` +
       `// We use import() (not require()) to avoid the ESM loader re-entrancy lock\n` +
       `// that causes microtask deadlocks when require(esm) is used.\n` +
-      `const bundlePath = path.join(__dirname, 'gateway-bundle.mjs');\n` +
+      `const bundlePath = path.join(runtimeRoot, 'gateway-bundle.mjs');\n` +
       `if (fs.existsSync(bundlePath)) {\n` +
       `  // Patch argv[1] to the bundle path so openclaw's isMainModule() matches.\n` +
       `  // isMainModule compares basename(import.meta.url) with basename(argv[1]);\n` +
@@ -861,17 +867,17 @@ export class OpenClawEngineManager extends EventEmitter {
       `function _loadFallback() {\n` +
       `  try {\n` +
       `    try {\n` +
-      `      const wf = require('./dist/warning-filter.js');\n` +
+      `      const wf = require(path.join(runtimeRoot, 'dist', 'warning-filter.js'));\n` +
       `      if (typeof wf.installProcessWarningFilter === 'function') {\n` +
       `        wf.installProcessWarningFilter();\n` +
       `      }\n` +
       `    } catch (_) {}\n` +
-      `    require('./dist/entry.js');\n` +
+      `    require(path.join(runtimeRoot, 'dist', 'entry.js'));\n` +
       `    process.stderr.write('[openclaw-launcher] require(entry.js) ok (' + (Date.now() - t0) + 'ms)\\n');\n` +
       `    try { require('node:module').flushCompileCache(); } catch (_) {}\n` +
       `  } catch (err) {\n` +
       `    process.stderr.write('[openclaw-launcher] require(entry.js) failed (' + (Date.now() - t0) + 'ms): ' + err.message + '\\n');\n` +
-      `    const entryPath = path.join(__dirname, 'dist', 'entry.js');\n` +
+      `    const entryPath = path.join(runtimeRoot, 'dist', 'entry.js');\n` +
       `    const importUrl = pathToFileURL(entryPath).href;\n` +
       `    process.stderr.write('[openclaw-launcher] falling back to import(): ' + importUrl + '\\n');\n` +
       `    import(importUrl).then(() => {\n` +
@@ -884,6 +890,7 @@ export class OpenClawEngineManager extends EventEmitter {
       `}\n`;
 
     try {
+      ensureDir(path.dirname(launcherPath));
       const existing = fs.existsSync(launcherPath) ? fs.readFileSync(launcherPath, 'utf8') : '';
       if (existing !== expectedContent) {
         fs.writeFileSync(launcherPath, expectedContent, 'utf8');
@@ -901,8 +908,9 @@ export class OpenClawEngineManager extends EventEmitter {
    * Unlike ensureGatewayLauncherCjs(), this version does not include a fallback
    * to dist/entry.js because the bundle is guaranteed to exist.
    */
-  private ensureGatewayLauncherCjsForBundle(runtimeRoot: string): string {
-    const launcherPath = path.join(runtimeRoot, 'gateway-launcher.cjs');
+  private ensureGatewayLauncherCjsForBundle(): string {
+    // Same rationale as ensureGatewayLauncherCjs(): avoid writing into Program Files.
+    const launcherPath = path.join(this.stateDir, 'gateway-launcher.cjs');
     const expectedContent =
       `// Auto-generated CJS launcher for Windows — bundle-only mode.\n` +
       `// Loads gateway-bundle.mjs directly without dist/ fallback.\n` +
@@ -912,6 +920,7 @@ export class OpenClawEngineManager extends EventEmitter {
       `const _log = (msg) => process.stderr.write('[openclaw-launcher] ' + msg + '\\n');\n` +
       `const _t0 = Date.now();\n` +
       `const _elapsed = () => (Date.now() - _t0) + 'ms';\n` +
+      `const runtimeRoot = process.env.OPENCLAW_HOME || __dirname;\n` +
       `// ─── Compile cache setup ───\n` +
       `try {\n` +
       `  const { enableCompileCache, getCompileCacheDir } = require('node:module');\n` +
@@ -920,7 +929,7 @@ export class OpenClawEngineManager extends EventEmitter {
       `  _log('compile-cache dir=' + getCompileCacheDir());\n` +
       `} catch (_) {}\n` +
       `// ─── Load bundle ───\n` +
-      `const bundlePath = path.join(__dirname, 'gateway-bundle.mjs');\n` +
+      `const bundlePath = path.join(runtimeRoot, 'gateway-bundle.mjs');\n` +
       `const _realpath = (p) => { try { return fs.realpathSync(path.resolve(p)); } catch { return path.resolve(p); } };\n` +
       `const _launcherInArgv = process.argv[1] &&\n` +
       `  _realpath(process.argv[1]).toLowerCase() === _realpath(__filename).toLowerCase();\n` +
@@ -941,6 +950,7 @@ export class OpenClawEngineManager extends EventEmitter {
       `});\n`;
 
     try {
+      ensureDir(path.dirname(launcherPath));
       const existing = fs.existsSync(launcherPath) ? fs.readFileSync(launcherPath, 'utf8') : '';
       if (existing !== expectedContent) {
         if (existing) {
@@ -953,10 +963,10 @@ export class OpenClawEngineManager extends EventEmitter {
       console.error('[OpenClaw] Failed to write gateway-launcher.cjs:', err);
       // Fall back to the legacy launcher generation
       const esmEntry = findPath([
-        path.join(runtimeRoot, 'openclaw.mjs'),
-        path.join(runtimeRoot, 'gateway.asar', 'openclaw.mjs'),
+        path.join(process.env.OPENCLAW_HOME || '', 'openclaw.mjs'),
+        path.join(process.env.OPENCLAW_HOME || '', 'gateway.asar', 'openclaw.mjs'),
       ]);
-      if (esmEntry) return this.ensureGatewayLauncherCjs(runtimeRoot, esmEntry);
+      if (esmEntry) return this.ensureGatewayLauncherCjs(esmEntry);
       return launcherPath;
     }
     return launcherPath;

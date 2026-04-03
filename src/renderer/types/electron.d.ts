@@ -118,6 +118,22 @@ interface OpenClawEngineStatus {
   canRetry: boolean;
 }
 
+interface CoworkSandboxProgress {
+  downloaded: number;
+  total: number;
+  percent: number;
+  speed: number;
+}
+
+type CoworkSandboxPhase = 'not_installed' | 'downloading' | 'installing' | 'ready' | 'error';
+
+interface CoworkSandboxStatus {
+  phase: CoworkSandboxPhase;
+  progress?: CoworkSandboxProgress;
+  message?: string;
+  canRetry: boolean;
+}
+
 interface AppUpdateDownloadProgress {
   received: number;
   total: number | undefined;
