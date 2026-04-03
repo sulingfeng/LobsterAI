@@ -1,4 +1,4 @@
-import cronstrue from 'cronstrue/i18n';
+// // import cronstrue from 'cronstrue';
 import { i18nService } from '../../services/i18n';
 import type {
   ScheduledTask,
@@ -144,13 +144,14 @@ function formatCronExpr(schedule: ScheduleCron): string {
 
 function fallbackCron(schedule: ScheduleCron): string {
   const tzLabel = schedule.tz ? ` (${schedule.tz})` : '';
-  try {
-    const locale = i18nService.getLanguage() === 'zh' ? 'zh_CN' : 'en';
-    const desc = cronstrue.toString(schedule.expr, { locale, use24HourTimeFormat: true });
-    return `${desc}${tzLabel}`;
-  } catch {
+  // TODO: Re-enable cronstrue when dependencies are properly installed
+  // try {
+  //   const locale = i18nService.getLanguage() === 'zh' ? 'zh_CN' : 'en';
+  //   const desc = cronstrue.toString(schedule.expr, { locale, use24HourTimeFormat: true });
+  //   return `${desc}${tzLabel}`;
+  // } catch {
     return `Cron · ${schedule.expr}${tzLabel}`;
-  }
+  // }
 }
 
 export function formatScheduleLabel(schedule: Schedule): string {

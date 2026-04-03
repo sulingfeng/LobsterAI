@@ -2681,3 +2681,9 @@ export function getCoworkOpenAICompatProxyStatus(): OpenAICompatProxyStatus {
     lastError: lastProxyError,
   };
 }
+
+export function setCoworkProxySessionId(sessionId: string | null): void {
+  // This function is a no-op for now, kept for compatibility
+  // It was previously used to track session IDs for proxy routing
+  console.debug('[OpenAICompatProxy] setCoworkProxySessionId:', sessionId);
+}
