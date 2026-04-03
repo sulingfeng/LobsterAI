@@ -8,10 +8,12 @@ dist
 dist-electron
 .DS_Store
 .env 
+.history
 .claude/
 __pycache__/
 .codebuddy/
 .work/
+.my_memory/
 vendor/openclaw-runtime/
 vendor/openclaw-plugins/
 
